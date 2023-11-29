@@ -48,6 +48,11 @@ from frappe.exceptions import SiteNotSpecifiedError
 @click.option(
 	"--set-default", is_flag=True, default=False, help="Set the new site as default site"
 )
+@click.option(
+	"--setup-db/--no-setup-db",
+	default=True,
+	help="Create user and database in mariadb/postgres; only bootstrap if false",
+)
 def new_site(
 	site,
 	db_root_username=None,
@@ -64,6 +69,7 @@ def new_site(
 	db_host=None,
 	db_port=None,
 	set_default=False,
+	setup_db=True,
 ):
 	"Create a new site"
 	from frappe.installer import _new_site, extract_sql_from_archive
@@ -88,6 +94,7 @@ def new_site(
 		db_type=db_type,
 		db_host=db_host,
 		db_port=db_port,
+		setup_db=setup_db,
 	)
 
 	if set_default:
@@ -406,7 +413,6 @@ def _reinstall(
 	verbose=False,
 ):
 	from frappe.installer import _new_site
-	from frappe.utils.synchronization import filelock
 
 	if not yes:
 		click.confirm("This will wipe your database. Are you sure you want to reinstall?", abort=True)
@@ -481,43 +487,35 @@ def install_app(context, apps, force=False):
 @click.option("--format", "-f", type=click.Choice(["text", "json"]), default="text")
 @pass_context
 def list_apps(context, format):
-	"List apps in site"
+	"""
+	List apps in site.
+	"""
 
 	summary_dict = {}
 
-	def fix_whitespaces(text):
-		if site == context.sites[-1]:
-			text = text.rstrip()
-		if len(context.sites) == 1:
-			text = text.lstrip()
-		return text
+	def format_app(app):
+		name_len = max(len(app.app_name) for app in apps)
+		ver_len = max(len(app.app_version) for app in apps)
+		template = f"{{0:{name_len}}} {{1:{ver_len}}} {{2}}"
+		return template.format(app.app_name, app.app_version, app.git_branch)
 
 	for site in context.sites:
 		frappe.init(site=site)
 		frappe.connect()
 		site_title = click.style(f"{site}", fg="green") if len(context.sites) > 1 else ""
+		installed_apps_info = []
+
 		apps = frappe.get_single("Installed Applications").installed_applications
-
 		if apps:
-			name_len, ver_len = (max(len(x.get(y)) for x in apps) for y in ["app_name", "app_version"])
-			template = f"{{0:{name_len}}} {{1:{ver_len}}} {{2}}"
-
-			installed_applications = [
-				template.format(app.app_name, app.app_version, app.git_branch) for app in apps
-			]
-			applications_summary = "\n".join(installed_applications)
-			summary = f"{site_title}\n{applications_summary}\n"
-			summary_dict[site] = [app.app_name for app in apps]
-
+			installed_apps_info.extend(format_app(app) for app in apps)
 		else:
-			installed_applications = frappe.get_installed_apps()
-			applications_summary = "\n".join(installed_applications)
-			summary = f"{site_title}\n{applications_summary}\n"
-			summary_dict[site] = installed_applications
+			installed_apps_info.extend(frappe.get_installed_apps())
 
-		summary = fix_whitespaces(summary)
+		installed_apps_info_str = "\n".join(installed_apps_info)
+		summary = f"{site_title}\n{installed_apps_info_str}\n"
+		summary_dict[site] = [app.app_name for app in apps]
 
-		if format == "text" and applications_summary and summary:
+		if format == "text" and installed_apps_info and summary:
 			print(summary)
 
 		frappe.destroy()
@@ -952,9 +950,9 @@ def move(dest_dir, site):
 	site_dump_exists = True
 	count = 0
 	while site_dump_exists:
-		final_new_path = new_path + (count and str(count) or "")
+		final_new_path = new_path + str(count or "")
 		site_dump_exists = os.path.exists(final_new_path)
-		count = int(count or 0) + 1
+		count += 1
 
 	shutil.move(old_path, final_new_path)
 	frappe.destroy()
@@ -1169,7 +1167,7 @@ def start_ngrok(context, bind_tls, use_default_authtoken):
 	port = frappe.conf.http_port or frappe.conf.webserver_port
 	tunnel = ngrok.connect(addr=str(port), host_header=site, bind_tls=bind_tls)
 	print(f"Public URL: {tunnel.public_url}")
-	print("Inspect logs at http://localhost:4040")
+	print("Inspect logs at http://127.0.0.1:4040")
 
 	ngrok_process = ngrok.get_ngrok_process()
 	try:

@@ -107,6 +107,7 @@ frappe.ui.form.Form = class FrappeForm {
 
 		// 2 column layout
 		this.setup_std_layout();
+		this.setup_filters();
 
 		// client script must be called after "setup" - there are no fields_dict attached to the frm otherwise
 		this.script_manager = new frappe.ui.form.ScriptManager({
@@ -155,14 +156,7 @@ frappe.ui.form.Form = class FrappeForm {
 			condition: () => !this.is_new(),
 		});
 
-		// Undo and redo
-		frappe.ui.keys.add_shortcut({
-			shortcut: "ctrl+z",
-			action: () => this.undo_manager.undo(),
-			page: this.page,
-			description: __("Undo last action"),
-			condition: () => !this.is_form_builder(),
-		});
+		// Alternate for redo, main shortcut are present in toolbar.js
 		frappe.ui.keys.add_shortcut({
 			shortcut: "shift+ctrl+z",
 			action: () => this.undo_manager.redo(),
@@ -171,10 +165,9 @@ frappe.ui.form.Form = class FrappeForm {
 			condition: () => !this.is_form_builder(),
 		});
 		frappe.ui.keys.add_shortcut({
-			shortcut: "ctrl+y",
-			action: () => this.undo_manager.redo(),
-			page: this.page,
-			description: __("Redo last action"),
+			shortcut: "ctrl+p",
+			action: () => this.print_doc(),
+			description: __("Print document"),
 		});
 
 		let grid_shortcut_keys = [
@@ -278,6 +271,41 @@ frappe.ui.form.Form = class FrappeForm {
 		this.states = new frappe.ui.form.States({
 			frm: this,
 		});
+	}
+
+	setup_filters() {
+		let fields_with_filters = frappe
+			.get_meta(this.doctype)
+			.fields.filter((field) => field.link_filters)
+			.map((field) => JSON.parse(field.link_filters));
+		if (fields_with_filters.length === 0) return;
+		fields_with_filters = this.parse_filters(fields_with_filters);
+		for (let link_field in fields_with_filters) {
+			const filters = fields_with_filters[link_field];
+			this.set_query(link_field, () => filters);
+		}
+	}
+
+	parse_filters(data) {
+		const parsed_data = {};
+
+		for (const d of data) {
+			for (const condition of d) {
+				let [doctype, field, operator, value] = condition;
+				doctype = doctype.fieldname;
+				if (!parsed_data[doctype]) {
+					parsed_data[doctype] = {
+						filters: {},
+					};
+				}
+
+				if (!parsed_data[doctype].filters[field]) {
+					parsed_data[doctype].filters[field] = [operator, value];
+				}
+			}
+		}
+
+		return parsed_data;
 	}
 
 	watch_model_updates() {
@@ -1248,6 +1276,10 @@ frappe.ui.form.Form = class FrappeForm {
 		frappe.set_route("print", this.doctype, this.doc.name);
 	}
 
+	show_audit_trail() {
+		frappe.set_route("audit-trail");
+	}
+
 	navigate_records(prev) {
 		let filters, sort_field, sort_order;
 		let list_view = frappe.get_list_view(this.doctype);
@@ -1837,7 +1869,7 @@ frappe.ui.form.Form = class FrappeForm {
 						<a class="indicator ${get_color(doc || {})}"
 							href="/app/${frappe.router.slug(df.options)}/${escaped_name}"
 							data-doctype="${df.options}"
-							data-name="${value}">
+							data-name="${frappe.utils.escape_html(value)}">
 							${label}
 						</a>
 					`;
@@ -2047,6 +2079,8 @@ frappe.ui.form.Form = class FrappeForm {
 			this.active_tab_map = {};
 		}
 		this.active_tab_map[this.docname] = tab;
+
+		this.script_manager.trigger("on_tab_change");
 	}
 	get_active_tab() {
 		return this.active_tab_map && this.active_tab_map[this.docname];

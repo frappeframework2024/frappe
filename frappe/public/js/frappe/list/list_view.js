@@ -631,10 +631,10 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		let subject_html = `
 			<input class="level-item list-check-all" type="checkbox"
 				title="${__("Select All")}">
-			<span class="level-item list-liked-by-me hidden-xs">
-				<span title="${__("Likes")}">${frappe.utils.icon("heart", "sm", "like-icon")}</span>
+			<span class="level-item" data-sort-by="${subject_field.fieldname}"
+				title="${__("Click to sort by {0}", [subject_field.label])}">
+				${__(subject_field.label)}
 			</span>
-			<span class="level-item">${__(subject_field.label)}</span>
 		`;
 		const $columns = this.columns
 			.map((col) => {
@@ -645,20 +645,35 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 					frappe.model.is_numeric_field(col.df) ? "text-right" : "",
 				].join(" ");
 
-				return `
-				<div class="${classes}">
-					${
-						col.type === "Subject"
-							? subject_html
-							: `
-						<span>${__((col.df && col.df.label) || col.type)}</span>`
-					}
-				</div>
+				let html = "";
+				if (col.type === "Subject") {
+					html = subject_html;
+				} else {
+					const fieldname = col.df?.fieldname;
+					const attrs = fieldname
+						? ` data-sort-by="${fieldname}"
+							title="${__("Click to sort by {0}", [col.df?.label])}"`
+						: "";
+					html = `<span ${attrs}>
+						${__(col.df?.label || col.type)}
+					</span>`;
+				}
+
+				return `<div class="${classes}">${html}</div>
 			`;
 			})
 			.join("");
 
-		return this.get_header_html_skeleton($columns, '<span class="list-count"></span>');
+		const right_html = `
+			<span class="list-count"></span>
+			<span class="level-item list-liked-by-me hidden-xs">
+				<span title="${__("Liked by me")}">
+					${frappe.utils.icon("es-solid-heart", "sm", "like-icon")}
+				</span>
+			</span>
+		`;
+
+		return this.get_header_html_skeleton($columns, right_html);
 	}
 
 	get_header_html_skeleton(left = "", right = "") {
@@ -830,15 +845,18 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 			frappe.model.is_numeric_field(df) ? "text-right" : "",
 		].join(" ");
 
-		const html_map = {
-			Subject: this.get_subject_html(doc),
-			Field: field_html(),
-		};
-		let column_html = html_map[col.type];
-
-		// listview_setting formatter
-		if (this.settings.formatters && this.settings.formatters[fieldname]) {
+		let column_html;
+		if (
+			this.settings.formatters &&
+			this.settings.formatters[fieldname] &&
+			col.type !== "Subject"
+		) {
 			column_html = this.settings.formatters[fieldname](value, df, doc);
+		} else {
+			column_html = {
+				Subject: this.get_subject_html(doc),
+				Field: field_html(),
+			}[col.type];
 		}
 
 		return `
@@ -886,23 +904,20 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 
 		const modified = comment_when(doc.modified, true);
 
-		let assigned_to = `<div class="list-assignments">
-			<span class="avatar avatar-small">
-			<span class="avatar-empty"></span>
-		</div>`;
+		let assigned_to = ``;
 
 		let assigned_users = JSON.parse(doc._assign || "[]");
 		if (assigned_users.length) {
-			assigned_to = `<div class="list-assignments">
+			assigned_to = `<div class="list-assignments d-flex align-items-center">
 					${frappe.avatar_group(assigned_users, 3, { filterable: true })[0].outerHTML}
 				</div>`;
 		}
 
 		let comment_count = null;
 		if (this.list_view_settings && !this.list_view_settings.disable_comment_count) {
-			comment_count = $(`<span class="comment-count"></span>`);
+			comment_count = $(`<span class="comment-count d-flex align-items-center"></span>`);
 			$(comment_count).append(`
-				${frappe.utils.icon("small-message")}
+				${frappe.utils.icon("es-line-chat-alt")}
 				${doc._comment_count > 99 ? "99+" : doc._comment_count || 0}`);
 		}
 
@@ -911,8 +926,12 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 				<div class="hidden-md hidden-xs">
 					${settings_button || assigned_to}
 				</div>
-				${modified}
+				<span class="modified">${modified}</span>
 				${comment_count ? $(comment_count).prop("outerHTML") : ""}
+				${comment_count ? '<span class="mx-2">·</span>' : ""}
+				<span class="list-row-like hidden-xs style="margin-bottom: 1px;">
+					${this.get_like_html(doc)}
+				</span>
 			</div>
 			<div class="level-item visible-xs text-right">
 				${this.get_indicator_dot(doc)}
@@ -970,7 +989,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		const div = document.createElement("div");
 		div.innerHTML = `
 			<span class="like-action ${heart_class}">
-				${frappe.utils.icon("heart", "sm", "like-icon")}
+				${frappe.utils.icon("es-solid-heart", "sm", "like-icon")}
 			</span>
 			<span class="likes-count">
 				${liked_by.length > 99 ? __("99") + "+" : __(liked_by.length || "")}
@@ -1003,9 +1022,6 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		div.innerHTML = `
 			<span class="level-item select-like">
 				<input class="list-row-checkbox" type="checkbox">
-				<span class="list-row-like hidden-xs style="margin-bottom: 1px;">
-					${this.get_like_html(doc)}
-				</span>
 			</span>
 			<span class="level-item ${seen} ellipsis">
 				<a class="ellipsis"></a>
@@ -1020,8 +1036,11 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		link.dataset.doctype = this.doctype;
 		link.dataset.name = doc.name;
 		link.href = this.get_form_link(doc);
-		link.title = value.toString();
-		link.textContent = value.toString();
+		// "Text Editor" and some other fieldtypes can have html tags in them so strip and show text.
+		// If no text is found show "No Text Found in {Field Label}"
+		let textValue = frappe.utils.html2text(value);
+		link.title = textValue;
+		link.textContent = textValue;
 
 		return div.innerHTML;
 	}
@@ -1036,7 +1055,9 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 		];
 		const title = docstatus_description[doc.docstatus || 0];
 		if (indicator) {
-			return `<span class="indicator-pill ${indicator[1]} filterable ellipsis"
+			return `<span class="indicator-pill ${
+				indicator[1]
+			} filterable no-indicator-dot ellipsis"
 				data-filter='${indicator[2]}' title='${title}'>
 				<span class="ellipsis"> ${__(indicator[0])}</span>
 			</span>`;
@@ -1061,6 +1082,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 
 	setup_events() {
 		this.setup_filterable();
+		this.setup_sort_by();
 		this.setup_list_click();
 		this.setup_drag_click();
 		this.setup_tag_event();
@@ -1199,6 +1221,20 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 				return [this.doctype, f[0], f[1], f.slice(2).join(",")];
 			});
 			this.filter_area.add(filters_to_apply);
+		});
+	}
+
+	setup_sort_by() {
+		this.$result.on("click", "[data-sort-by]", (e) => {
+			const sort_by = e.currentTarget.getAttribute("data-sort-by");
+			if (!sort_by) return;
+			let sort_order = "asc"; // always start with asc
+			if (this.sort_by === sort_by) {
+				// unless it's the same field, then toggle
+				sort_order = this.sort_order === "asc" ? "desc" : "asc";
+			}
+			this.sort_selector.set_value(sort_by, sort_order);
+			this.on_sort_change(sort_by, sort_order);
 		});
 	}
 
@@ -1637,7 +1673,7 @@ frappe.views.ListView = class ListView extends frappe.views.BaseList {
 					}
 				},
 				standard: true,
-				shortcut: "Ctrl+J",
+				shortcut: "Ctrl+Y",
 			});
 		}
 

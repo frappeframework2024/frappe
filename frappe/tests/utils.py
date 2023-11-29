@@ -7,9 +7,12 @@ from collections.abc import Sequence
 from contextlib import contextmanager
 from unittest.mock import patch
 
+import pytz
+
 import frappe
-from frappe.model.base_document import BaseDocument
+from frappe.model.base_document import BaseDocument, get_controller
 from frappe.utils import cint
+from frappe.utils.data import convert_utc_to_timezone, get_datetime, get_system_timezone
 
 datetime_like_types = (datetime.datetime, datetime.date, datetime.time, datetime.timedelta)
 
@@ -77,6 +80,23 @@ class FrappeTestCase(unittest.TestCase):
 		else:
 			self.assertEqual(expected, actual, msg=msg)
 
+	def normalize_html(self, code: str) -> str:
+		"""Formats HTML consistently so simple string comparisons can work on them."""
+		from bs4 import BeautifulSoup
+
+		return BeautifulSoup(code, "html.parser").prettify(formatter=None)
+
+	def normalize_sql(self, query: str) -> str:
+		"""Formats SQL consistently so simple string comparisons can work on them."""
+		import sqlparse
+
+		return (
+			sqlparse.format(query.strip(), keyword_case="upper", reindent=True, strip_comments=True),
+		)
+
+	def assertQueryEqual(self, first: str, second: str):
+		self.assertEqual(self.normalize_sql(first), self.normalize_sql(second))
+
 	@contextmanager
 	def assertQueryCount(self, count):
 		queries = []
@@ -131,10 +151,37 @@ class FrappeTestCase(unittest.TestCase):
 
 	@contextmanager
 	def set_user(self, user: str):
-		old_user = frappe.session.user
-		frappe.set_user(user)
-		yield
-		frappe.set_user(old_user)
+		try:
+			old_user = frappe.session.user
+			frappe.set_user(user)
+			yield
+		finally:
+			frappe.set_user(old_user)
+
+	@contextmanager
+	def switch_site(self, site: str):
+		"""Switch connection to different site.
+		Note: Drops current site connection completely."""
+
+		try:
+			old_site = frappe.local.site
+			frappe.init(site, force=True)
+			frappe.connect()
+			yield
+		finally:
+			frappe.init(old_site, force=True)
+			frappe.connect()
+
+	@contextmanager
+	def freeze_time(self, time_to_freeze, *args, **kwargs):
+		from freezegun import freeze_time
+
+		# Freeze time expects UTC or tzaware objects. We have neither, so convert to UTC.
+		timezone = pytz.timezone(get_system_timezone())
+		fake_time_with_tz = timezone.localize(get_datetime(time_to_freeze)).astimezone(pytz.utc)
+
+		with freeze_time(fake_time_with_tz, *args, **kwargs):
+			yield
 
 
 class MockedRequestTestCase(FrappeTestCase):
@@ -177,7 +224,7 @@ def _restore_thread_locals(flags):
 
 
 @contextmanager
-def change_settings(doctype, settings_dict):
+def change_settings(doctype, settings_dict=None, /, **settings):
 	"""A context manager to ensure that settings are changed before running
 	function and restored after running it regardless of exceptions occured.
 	This is useful in tests where you want to make changes in a function but
@@ -188,7 +235,14 @@ def change_settings(doctype, settings_dict):
 	@change_settings("Print Settings", {"send_print_as_pdf": 1})
 	def test_case(self):
 	        ...
+
+	@change_settings("Print Settings", send_print_as_pdf=1)
+	def test_case(self):
+	        ...
 	"""
+
+	if settings_dict is None:
+		settings_dict = settings
 
 	try:
 		settings = frappe.get_doc(doctype)
@@ -247,3 +301,21 @@ def patch_hooks(overridden_hoooks):
 
 	with patch.object(frappe, "get_hooks", patched_hooks):
 		yield
+
+
+def check_orpahned_doctypes():
+	"""Check that all doctypes in DB actually exist after patch test"""
+
+	doctypes = frappe.get_all("DocType", {"custom": 0}, pluck="name")
+	orpahned_doctypes = []
+
+	for doctype in doctypes:
+		try:
+			get_controller(doctype)
+		except ImportError:
+			orpahned_doctypes.append(doctype)
+
+	if orpahned_doctypes:
+		frappe.throw(
+			"Following doctypes exist in DB without controller.\n {}".format("\n".join(orpahned_doctypes))
+		)

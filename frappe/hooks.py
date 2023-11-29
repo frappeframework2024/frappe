@@ -35,6 +35,10 @@ app_include_css = [
 	"desk.bundle.css",
 	"report.bundle.css",
 ]
+app_include_icons = [
+	"frappe/icons/timeless/icons.svg",
+	"frappe/icons/espresso/icons.svg",
+]
 
 doctype_js = {
 	"Web Page": "public/js/frappe/utils/web_template.js",
@@ -57,6 +61,10 @@ website_route_rules = [
 
 website_redirects = [
 	{"source": r"/desk(.*)", "target": r"/app\1"},
+	{
+		"source": "/.well-known/openid-configuration",
+		"target": "/api/method/frappe.integrations.oauth2.openid_configuration",
+	},
 ]
 
 base_template = "templates/base.html"
@@ -114,6 +122,7 @@ permission_query_conditions = {
 has_permission = {
 	"Event": "frappe.desk.doctype.event.event.has_permission",
 	"ToDo": "frappe.desk.doctype.todo.todo.has_permission",
+	"Note": "frappe.desk.doctype.note.note.has_permission",
 	"User": "frappe.core.doctype.user.user.has_permission",
 	"Dashboard Chart": "frappe.desk.doctype.dashboard_chart.dashboard_chart.has_permission",
 	"Number Card": "frappe.desk.doctype.number_card.number_card.has_permission",
@@ -236,7 +245,6 @@ scheduler_events = {
 		"frappe.integrations.doctype.google_contacts.google_contacts.sync",
 		"frappe.automation.doctype.auto_repeat.auto_repeat.make_auto_repeat_entry",
 		"frappe.automation.doctype.auto_repeat.auto_repeat.set_auto_repeat_as_completed",
-		"frappe.email.doctype.unhandled_email.unhandled_email.remove_old_unhandled_emails",
 	],
 	"daily_long": [
 		"frappe.integrations.doctype.dropbox_settings.dropbox_settings.take_backups_daily",
@@ -259,11 +267,6 @@ scheduler_events = {
 	"monthly_long": [
 		"frappe.integrations.doctype.s3_backup_settings.s3_backup_settings.take_backups_monthly"
 	],
-}
-
-get_translated_dict = {
-	("doctype", "System Settings"): "frappe.geo.country_info.get_translated_dict",
-	("page", "setup-wizard"): "frappe.geo.country_info.get_translated_dict",
 }
 
 sounds = [
@@ -410,6 +413,7 @@ ignore_links_on_delete = [
 	"Integration Request",
 	"Unhandled Email",
 	"Webhook Request Log",
+	"Workspace",
 ]
 
 # Request Hooks
@@ -418,7 +422,6 @@ before_request = [
 	"frappe.monitor.start",
 	"frappe.rate_limiter.apply",
 ]
-after_request = ["frappe.rate_limiter.update", "frappe.monitor.stop", "frappe.recorder.dump"]
 
 # Background Job Hooks
 before_job = [

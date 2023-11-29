@@ -73,6 +73,7 @@ export default class Section {
 		this.indicator.hide();
 
 		if (this.df.collapsible) {
+			this.head.addClass("collapsible");
 			// show / hide based on status
 			this.collapse_link = this.head.on("click", () => {
 				this.collapse();
@@ -128,7 +129,7 @@ export default class Section {
 	}
 
 	set_icon(hide) {
-		let indicator_icon = hide ? "down" : "up-line";
+		let indicator_icon = hide ? "es-line-down" : "es-line-up";
 		this.indicator && this.indicator.html(frappe.utils.icon(indicator_icon, "sm", "mb-1"));
 	}
 
